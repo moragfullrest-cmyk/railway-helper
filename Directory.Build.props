@@ -1,0 +1,11 @@
+<Project>
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <Authors>Marking Worker Contributors</Authors>
+    <Company>Marking Worker</Company>
+    <Copyright>Copyright © Marking Worker Contributors</Copyright>
+    <RepositoryUrl>https://github.com/moragfullrest-cmyk/railway-helper</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+  </PropertyGroup>
+</Project>
