@@ -8,7 +8,7 @@
     <AssemblyName>RailwayHelper</AssemblyName>
 
     <PackageId>RailwayHelper</PackageId>
-    <Version>1.2.0</Version>
+    <Version>1.2.1</Version>
     <Title>RailwayHelper</Title>
     <Description>Railway-oriented pipeline builder for FluentResults: composable Do / Next / Peek chains with cancellation, labeled error context, and centralized OnFailure handling.</Description>
     <PackageTags>fluentresults;railway;pipeline;result;functional;async;rop</PackageTags>
