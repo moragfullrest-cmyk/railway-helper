@@ -109,19 +109,31 @@ public static partial class RailwayHelper
 
     /// <summary>Результат шага pipeline с типизированным значением.</summary>
     /// <typeparam name="TData">Тип значения результата.</typeparam>
-    /// <param name="Result">Результат FluentResults.</param>
-    /// <param name="Token">Актуальный токен отмены шага.</param>
-    public sealed record RopResult<TData>(Result<TData> Result, CancellationToken Token)
+    /// <param name="result">Результат FluentResults.</param>
+    /// <param name="token">Актуальный токен отмены шага.</param>
+    public readonly struct RopResult<TData>(Result<TData> result, CancellationToken token)
     {
-        public static implicit operator Result<TData>(RopResult<TData> result) => result.Result;
+        /// <summary>Результат FluentResults.</summary>
+        public Result<TData> Result { get; } = result;
+
+        /// <summary>Актуальный токен отмены шага.</summary>
+        public CancellationToken Token { get; } = token;
+
+        public static implicit operator Result<TData>(RopResult<TData> ropResult) => ropResult.Result;
     }
 
     /// <summary>Результат шага pipeline без возвращаемого значения.</summary>
-    /// <param name="Result">Результат FluentResults.</param>
-    /// <param name="Token">Актуальный токен отмены шага.</param>
-    public sealed record RopResult(Result Result, CancellationToken Token)
+    /// <param name="result">Результат FluentResults.</param>
+    /// <param name="token">Актуальный токен отмены шага.</param>
+    public readonly struct RopResult(Result result, CancellationToken token)
     {
-        public static implicit operator Result(RopResult result) => result.Result;
+        /// <summary>Результат FluentResults.</summary>
+        public Result Result { get; } = result;
+
+        /// <summary>Актуальный токен отмены шага.</summary>
+        public CancellationToken Token { get; } = token;
+
+        public static implicit operator Result(RopResult ropResult) => ropResult.Result;
     }
 
     /// <summary>Преобразует типизированный <see cref="RopResult{TData}"/> в нетипизированный <see cref="RopResult"/>.</summary>
@@ -240,12 +252,18 @@ public static partial class RailwayHelper
         };
 
     /// <inheritdoc cref="OnFailure{TInput}(ValueTask{RopResult{TInput}}, Func{ResultBase, Task})"/>
-    public static Task<Result<TInput>> OnFailure<TInput>(this ValueTask<RopResult<TInput>> inputTask, Action<ResultBase> func) =>
-        inputTask.OnFailure<TInput>(failed => { func(failed); return Task.CompletedTask; });
+    public static Task<Result<TInput>> OnFailure<TInput>(this ValueTask<RopResult<TInput>> inputTask, Action<ResultBase> func)
+    {
+        ArgumentNullException.ThrowIfNull(func);
+        return inputTask.OnFailure<TInput>(failed => { func(failed); return Task.CompletedTask; });
+    }
 
     /// <inheritdoc cref="OnFailure{TInput}(ValueTask{RopResult{TInput}}, Func{ResultBase, Task})"/>
-    public static Task<Result> OnFailure(this ValueTask<RopResult> inputTask, Action<ResultBase> func) =>
-        inputTask.OnFailure(failed => { func(failed); return Task.CompletedTask; });
+    public static Task<Result> OnFailure(this ValueTask<RopResult> inputTask, Action<ResultBase> func)
+    {
+        ArgumentNullException.ThrowIfNull(func);
+        return inputTask.OnFailure(failed => { func(failed); return Task.CompletedTask; });
+    }
 
     /// <inheritdoc cref="OnFailure{TInput}(ValueTask{RopResult{TInput}}, Func{ResultBase, Task})"/>
     public static async Task<Result<TInput>> OnFailure<TInput>(this ValueTask<RopResult<TInput>> inputTask, Func<ResultBase, CancellationToken, Task> func) =>

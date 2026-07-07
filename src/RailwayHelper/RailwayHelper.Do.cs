@@ -201,11 +201,11 @@ public static partial class RailwayHelper
     /// <param name="cancellationToken">Токен отмены.</param>
     /// <returns>Коллекция результатов при успехе всех элементов.</returns>
     public static ValueTask<RopResult<IEnumerable<TOutput>>> DoEach<TInput, TOutput>(IEnumerable<TInput> input, Func<TInput, TOutput> func, string label = null, CancellationToken cancellationToken = default) =>
-        DoInternal<IEnumerable<TInput>, IEnumerable<TOutput>>(input, (v, token) => EachCore<TInput, TOutput>(v, Lift.From<TInput, TOutput>(func), token), label, cancellationToken);
+        DoInternal<IEnumerable<TInput>, IEnumerable<TOutput>>(input, (v, token) => EachCoreSync<TInput, TOutput>(v, func, token), label, cancellationToken);
 
     /// <summary>Перегрузка для делегата, возвращающего <see cref="Result{TValue}"/>.</summary>
     public static ValueTask<RopResult<IEnumerable<TOutput>>> DoEach<TInput, TOutput>(IEnumerable<TInput> input, Func<TInput, Result<TOutput>> func, string label = null, CancellationToken cancellationToken = default) =>
-        DoInternal<IEnumerable<TInput>, IEnumerable<TOutput>>(input, (v, token) => EachCore<TInput, TOutput>(v, Lift.From<TInput, TOutput>(func), token), label, cancellationToken);
+        DoInternal<IEnumerable<TInput>, IEnumerable<TOutput>>(input, (v, token) => EachCoreSync<TInput, TOutput>(v, func, token), label, cancellationToken);
 
     /// <summary>Перегрузка для асинхронного делегата <see cref="Task{TResult}"/>.</summary>
     public static ValueTask<RopResult<IEnumerable<TOutput>>> DoEach<TInput, TOutput>(IEnumerable<TInput> input, Func<TInput, Task<TOutput>> func, string label = null, CancellationToken cancellationToken = default) =>
@@ -217,11 +217,11 @@ public static partial class RailwayHelper
 
     /// <summary>Перегрузка для делегата с <see cref="CancellationToken"/>.</summary>
     public static ValueTask<RopResult<IEnumerable<TOutput>>> DoEach<TInput, TOutput>(IEnumerable<TInput> input, Func<TInput, CancellationToken, TOutput> func, string label = null, CancellationToken cancellationToken = default) =>
-        DoInternal<IEnumerable<TInput>, IEnumerable<TOutput>>(input, (v, token) => EachCore<TInput, TOutput>(v, Lift.From<TInput, TOutput>(func), token), label, cancellationToken);
+        DoInternal<IEnumerable<TInput>, IEnumerable<TOutput>>(input, (v, token) => EachCoreSync<TInput, TOutput>(v, func, token), label, cancellationToken);
 
     /// <summary>Перегрузка для делегата с <see cref="CancellationToken"/>, возвращающего <see cref="Result{TValue}"/>.</summary>
     public static ValueTask<RopResult<IEnumerable<TOutput>>> DoEach<TInput, TOutput>(IEnumerable<TInput> input, Func<TInput, CancellationToken, Result<TOutput>> func, string label = null, CancellationToken cancellationToken = default) =>
-        DoInternal<IEnumerable<TInput>, IEnumerable<TOutput>>(input, (v, token) => EachCore<TInput, TOutput>(v, Lift.From<TInput, TOutput>(func), token), label, cancellationToken);
+        DoInternal<IEnumerable<TInput>, IEnumerable<TOutput>>(input, (v, token) => EachCoreSync<TInput, TOutput>(v, func, token), label, cancellationToken);
 
     /// <summary>Перегрузка для асинхронного делегата с <see cref="CancellationToken"/>.</summary>
     public static ValueTask<RopResult<IEnumerable<TOutput>>> DoEach<TInput, TOutput>(IEnumerable<TInput> input, Func<TInput, CancellationToken, Task<TOutput>> func, string label = null, CancellationToken cancellationToken = default) =>
@@ -245,7 +245,7 @@ public static partial class RailwayHelper
     /// <param name="cancellationToken">Токен отмены.</param>
     /// <returns>Результат шага pipeline.</returns>
     public static ValueTask<RopResult> DoEach<TInput>(IEnumerable<TInput> input, Action<TInput> func, string label = null, CancellationToken cancellationToken = default) =>
-        DoEachSideEffect<TInput>(input, Lift.FromVoid<TInput>(func), label, cancellationToken);
+        DoEachSideEffectSync<TInput>(input, func, label, cancellationToken);
 
     /// <summary>Перегрузка для асинхронного делегата <see cref="Task"/>.</summary>
     public static ValueTask<RopResult> DoEach<TInput>(IEnumerable<TInput> input, Func<TInput, Task> func, string label = null, CancellationToken cancellationToken = default) =>
@@ -253,7 +253,7 @@ public static partial class RailwayHelper
 
     /// <summary>Перегрузка для делегата, возвращающего <see cref="Result"/>.</summary>
     public static ValueTask<RopResult> DoEach<TInput>(IEnumerable<TInput> input, Func<TInput, Result> func, string label = null, CancellationToken cancellationToken = default) =>
-        DoEachSideEffect<TInput>(input, Lift.FromVoid<TInput>(func), label, cancellationToken);
+        DoEachSideEffectSync<TInput>(input, func, label, cancellationToken);
 
     /// <summary>Перегрузка для асинхронного делегата <see cref="Task{Result}"/>.</summary>
     public static ValueTask<RopResult> DoEach<TInput>(IEnumerable<TInput> input, Func<TInput, Task<Result>> func, string label = null, CancellationToken cancellationToken = default) =>
@@ -261,7 +261,7 @@ public static partial class RailwayHelper
 
     /// <summary>Перегрузка для делегата с <see cref="CancellationToken"/>.</summary>
     public static ValueTask<RopResult> DoEach<TInput>(IEnumerable<TInput> input, Action<TInput, CancellationToken> func, string label = null, CancellationToken cancellationToken = default) =>
-        DoEachSideEffect<TInput>(input, Lift.FromVoid<TInput>(func), label, cancellationToken);
+        DoEachSideEffectSync<TInput>(input, func, label, cancellationToken);
 
     /// <summary>Перегрузка для асинхронного делегата с <see cref="CancellationToken"/>.</summary>
     public static ValueTask<RopResult> DoEach<TInput>(IEnumerable<TInput> input, Func<TInput, CancellationToken, Task> func, string label = null, CancellationToken cancellationToken = default) =>
@@ -269,7 +269,7 @@ public static partial class RailwayHelper
 
     /// <summary>Перегрузка для делегата с <see cref="CancellationToken"/>, возвращающего <see cref="Result"/>.</summary>
     public static ValueTask<RopResult> DoEach<TInput>(IEnumerable<TInput> input, Func<TInput, CancellationToken, Result> func, string label = null, CancellationToken cancellationToken = default) =>
-        DoEachSideEffect<TInput>(input, Lift.FromVoid<TInput>(func), label, cancellationToken);
+        DoEachSideEffectSync<TInput>(input, func, label, cancellationToken);
 
     /// <summary>Перегрузка для асинхронного делегата с <see cref="CancellationToken"/>, возвращающего <see cref="Result"/>.</summary>
     public static ValueTask<RopResult> DoEach<TInput>(IEnumerable<TInput> input, Func<TInput, CancellationToken, Task<Result>> func, string label = null, CancellationToken cancellationToken = default) =>

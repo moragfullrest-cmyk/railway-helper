@@ -85,11 +85,11 @@ public static partial class RailwayHelper
 
     /// <summary>Перегрузка для синхронного <see cref="Action{T}"/>.</summary>
     public static ValueTask<RopResult<IEnumerable<TInput>>> PeekEach<TInput>(this ValueTask<RopResult<IEnumerable<TInput>>> input, Action<TInput> func, string label = null) =>
-        PeekEachInternal<TInput>(input, Lift.FromVoid<TInput>(func), label);
+        PeekEachInternalSync<TInput>(input, func, label);
 
     /// <summary>Перегрузка для делегата, возвращающего <see cref="Result"/>.</summary>
     public static ValueTask<RopResult<IEnumerable<TInput>>> PeekEach<TInput>(this ValueTask<RopResult<IEnumerable<TInput>>> input, Func<TInput, Result> func, string label = null) =>
-        PeekEachInternal<TInput>(input, Lift.FromVoid<TInput>(func), label);
+        PeekEachInternalSync<TInput>(input, func, label);
 
     /// <summary>Перегрузка для асинхронного делегата <see cref="Task{Result}"/>.</summary>
     public static ValueTask<RopResult<IEnumerable<TInput>>> PeekEach<TInput>(this ValueTask<RopResult<IEnumerable<TInput>>> input, Func<TInput, Task<Result>> func, string label = null) =>
@@ -126,9 +126,9 @@ public static partial class RailwayHelper
 
     /// <summary>Перегрузка для <see cref="Action{T1, T2}"/> с <see cref="CancellationToken"/>.</summary>
     public static ValueTask<RopResult<IEnumerable<TInput>>> PeekEach<TInput>(this ValueTask<RopResult<IEnumerable<TInput>>> input, Action<TInput, CancellationToken> func, string label = null) =>
-        PeekEachInternal<TInput>(input, Lift.FromVoid<TInput>(func), label);
+        PeekEachInternalSync<TInput>(input, func, label);
     public static ValueTask<RopResult<IEnumerable<TInput>>> PeekEach<TInput>(this ValueTask<RopResult<IEnumerable<TInput>>> input, Func<TInput, CancellationToken, Result> func, string label = null) =>
-        PeekEachInternal<TInput>(input, Lift.FromVoid<TInput>(func), label);
+        PeekEachInternalSync<TInput>(input, func, label);
     public static ValueTask<RopResult<IEnumerable<TInput>>> PeekEach<TInput>(this ValueTask<RopResult<IEnumerable<TInput>>> input, Func<TInput, CancellationToken, Task<Result>> func, string label = null) =>
         PeekEachInternal<TInput>(input, Lift.FromVoid<TInput>(func), label);
 
