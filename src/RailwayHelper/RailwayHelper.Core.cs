@@ -270,6 +270,7 @@ public static partial class RailwayHelper
     /// <param name="func">Асинхронный обработчик ошибки.</param>
     private static async Task<Result> OnHandledFailureAsync(ResultBase failed, Func<ResultBase, Task> func)
     {
+        ArgumentNullException.ThrowIfNull(func);
         await func(failed);
         return Result.Fail(new HandledFailureError());
     }
@@ -282,6 +283,7 @@ public static partial class RailwayHelper
     /// <param name="func">Асинхронный обработчик ошибки.</param>
     private static async Task<Result<T>> OnHandledFailureAsync<T>(ResultBase failed, Func<ResultBase, Task> func)
     {
+        ArgumentNullException.ThrowIfNull(func);
         await func(failed);
         return Result.Fail<T>(new HandledFailureError());
     }
@@ -294,6 +296,7 @@ public static partial class RailwayHelper
     /// <param name="token">Токен отмены шага.</param>
     private static async Task<Result> OnHandledFailureAsync(ResultBase failed, Func<ResultBase, CancellationToken, Task> func, CancellationToken token)
     {
+        ArgumentNullException.ThrowIfNull(func);
         await func(failed, token);
         return Result.Fail(new HandledFailureError());
     }
@@ -307,6 +310,7 @@ public static partial class RailwayHelper
     /// <param name="token">Токен отмены шага.</param>
     private static async Task<Result<T>> OnHandledFailureAsync<T>(ResultBase failed, Func<ResultBase, CancellationToken, Task> func, CancellationToken token)
     {
+        ArgumentNullException.ThrowIfNull(func);
         await func(failed, token);
         return Result.Fail<T>(new HandledFailureError());
     }

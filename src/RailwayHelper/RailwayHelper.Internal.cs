@@ -181,17 +181,7 @@ public static partial class RailwayHelper
         static EnumerableAny()
         {
             Type type = typeof(T);
-            IsCollection = type switch
-            {
-                { IsArray: true } => true,
-                { IsGenericType: true } => type.GetGenericTypeDefinition() switch
-                {
-                    var def when def == typeof(IEnumerable<>) => true,
-                    var def when def.GetInterfaces().Any(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEnumerable<>)) => true,
-                    _ => false
-                },
-                _ => false
-            };
+            IsCollection = type != typeof(string) && typeof(IEnumerable).IsAssignableFrom(type);
 
             if (!IsCollection)
                 return;

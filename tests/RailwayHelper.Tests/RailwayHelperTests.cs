@@ -337,6 +337,39 @@ public sealed class RailwayHelperTests
         #endregion
     }
 
+    [Fact(DisplayName = "Do — пустой non-generic IEnumerable<T> даёт NoDataError")]
+    public async Task Do_when_empty_non_generic_enumerable_returns_no_data()
+    {
+        #region Arrange
+        var input = new NonGenericNumbers();
+        #endregion
+
+        #region Act
+        RopResult<int> rop = await Do(input, x => x.Count(), cancellationToken: TestContext.Current.CancellationToken);
+        #endregion
+
+        #region Assert
+        rop.Result.Errors[0].ShouldBeOfType<NoDataError>();
+        #endregion
+    }
+
+    [Fact(DisplayName = "Do — непустой non-generic IEnumerable<T> обрабатывается")]
+    public async Task Do_when_non_empty_non_generic_enumerable_succeeds()
+    {
+        #region Arrange
+        var input = new NonGenericNumbers(1, 2, 3);
+        #endregion
+
+        #region Act
+        RopResult<int> rop = await Do(input, x => x.Sum(), cancellationToken: TestContext.Current.CancellationToken);
+        #endregion
+
+        #region Assert
+        rop.Result.IsSuccess.ShouldBeTrue();
+        rop.Result.Value.ShouldBe(6);
+        #endregion
+    }
+
     [Fact(DisplayName = "Do — identity overload пробрасывает вход без преобразования")]
     public async Task Do_when_identity_passes_input_through()
     {
@@ -1466,6 +1499,54 @@ public sealed class RailwayHelperTests
         #endregion
     }
 
+    [Fact(DisplayName = "OnFailure — null Action handler кидает ArgumentNullException")]
+    public async Task OnFailure_when_action_handler_is_null_throws_argument_null_exception()
+    {
+        #region Arrange
+        #endregion
+
+        #region Act
+        Task<Result<int>> action() => Do(() => Result.Fail<int>("x"), cancellationToken: TestContext.Current.CancellationToken)
+            .OnFailure((Action<ResultBase>)null);
+        #endregion
+
+        #region Assert
+        await Should.ThrowAsync<ArgumentNullException>(action);
+        #endregion
+    }
+
+    [Fact(DisplayName = "OnFailure — null async handler кидает ArgumentNullException")]
+    public async Task OnFailure_when_async_handler_is_null_throws_argument_null_exception()
+    {
+        #region Arrange
+        #endregion
+
+        #region Act
+        Task<Result<int>> action() => Do(() => Result.Fail<int>("x"), cancellationToken: TestContext.Current.CancellationToken)
+            .OnFailure((Func<ResultBase, Task>)null);
+        #endregion
+
+        #region Assert
+        await Should.ThrowAsync<ArgumentNullException>(action);
+        #endregion
+    }
+
+    [Fact(DisplayName = "OnFailure — null handler с token кидает ArgumentNullException")]
+    public async Task OnFailure_when_token_handler_is_null_throws_argument_null_exception()
+    {
+        #region Arrange
+        #endregion
+
+        #region Act
+        Task<Result<int>> action() => Do(() => Result.Fail<int>("x"), cancellationToken: TestContext.Current.CancellationToken)
+            .OnFailure((Func<ResultBase, CancellationToken, Task>)null);
+        #endregion
+
+        #region Assert
+        await Should.ThrowAsync<ArgumentNullException>(action);
+        #endregion
+    }
+
     #endregion
 
     #region TryGetCallData и типы ошибок
@@ -2366,6 +2447,15 @@ public sealed class RailwayHelperTests
         public TKey Key { get; } = key;
 
         public IEnumerator<TElement> GetEnumerator() => elements.GetEnumerator();
+
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    private sealed class NonGenericNumbers(params int[] items) : IEnumerable<int>
+    {
+        private readonly int[] _items = items;
+
+        public IEnumerator<int> GetEnumerator() => ((IEnumerable<int>)_items).GetEnumerator();
 
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
     }
