@@ -224,44 +224,68 @@ public static partial class RailwayHelper
     /// <param name="inputTask">Задача с результатом pipeline.</param>
     /// <param name="func">Асинхронный обработчик ошибки.</param>
     /// <returns>Итоговый <see cref="Result{TValue}"/>.</returns>
-    public static async Task<Result<TInput>> OnFailure<TInput>(this Task<RopResult<TInput>> inputTask, Func<ResultBase, Task> func) =>
+    public static async Task<Result<TInput>> OnFailure<TInput>(this ValueTask<RopResult<TInput>> inputTask, Func<ResultBase, Task> func) =>
         (await inputTask) switch
         {
             { Result.IsFailed: true, Result: var failed } => await OnHandledFailureAsync<TInput>(failed, func),
             { Result: var result } => result,
         };
 
-    /// <inheritdoc cref="OnFailure{TInput}(Task{RopResult{TInput}}, Func{ResultBase, Task})"/>
-    public static async Task<Result> OnFailure(this Task<RopResult> inputTask, Func<ResultBase, Task> func) =>
+    /// <inheritdoc cref="OnFailure{TInput}(ValueTask{RopResult{TInput}}, Func{ResultBase, Task})"/>
+    public static async Task<Result> OnFailure(this ValueTask<RopResult> inputTask, Func<ResultBase, Task> func) =>
         (await inputTask) switch
         {
             { Result.IsFailed: true, Result: var failed } => await OnHandledFailureAsync(failed, func),
             { Result: var result } => result,
         };
 
-    /// <inheritdoc cref="OnFailure{TInput}(Task{RopResult{TInput}}, Func{ResultBase, Task})"/>
-    public static Task<Result<TInput>> OnFailure<TInput>(this Task<RopResult<TInput>> inputTask, Action<ResultBase> func) =>
+    /// <inheritdoc cref="OnFailure{TInput}(ValueTask{RopResult{TInput}}, Func{ResultBase, Task})"/>
+    public static Task<Result<TInput>> OnFailure<TInput>(this ValueTask<RopResult<TInput>> inputTask, Action<ResultBase> func) =>
         inputTask.OnFailure<TInput>(failed => { func(failed); return Task.CompletedTask; });
 
-    /// <inheritdoc cref="OnFailure{TInput}(Task{RopResult{TInput}}, Func{ResultBase, Task})"/>
-    public static Task<Result> OnFailure(this Task<RopResult> inputTask, Action<ResultBase> func) =>
+    /// <inheritdoc cref="OnFailure{TInput}(ValueTask{RopResult{TInput}}, Func{ResultBase, Task})"/>
+    public static Task<Result> OnFailure(this ValueTask<RopResult> inputTask, Action<ResultBase> func) =>
         inputTask.OnFailure(failed => { func(failed); return Task.CompletedTask; });
 
-    /// <inheritdoc cref="OnFailure{TInput}(Task{RopResult{TInput}}, Func{ResultBase, Task})"/>
-    public static async Task<Result<TInput>> OnFailure<TInput>(this Task<RopResult<TInput>> inputTask, Func<ResultBase, CancellationToken, Task> func) =>
+    /// <inheritdoc cref="OnFailure{TInput}(ValueTask{RopResult{TInput}}, Func{ResultBase, Task})"/>
+    public static async Task<Result<TInput>> OnFailure<TInput>(this ValueTask<RopResult<TInput>> inputTask, Func<ResultBase, CancellationToken, Task> func) =>
         (await inputTask) switch
         {
             { Result.IsFailed: true, Result: var failed, Token: var token } => await OnHandledFailureAsync<TInput>(failed, func, token),
             { Result: var result } => result,
         };
 
-    /// <inheritdoc cref="OnFailure{TInput}(Task{RopResult{TInput}}, Func{ResultBase, Task})"/>
-    public static async Task<Result> OnFailure(this Task<RopResult> inputTask, Func<ResultBase, CancellationToken, Task> func) =>
+    /// <inheritdoc cref="OnFailure{TInput}(ValueTask{RopResult{TInput}}, Func{ResultBase, Task})"/>
+    public static async Task<Result> OnFailure(this ValueTask<RopResult> inputTask, Func<ResultBase, CancellationToken, Task> func) =>
         (await inputTask) switch
         {
             { Result.IsFailed: true, Result: var failed, Token: var token } => await OnHandledFailureAsync(failed, func, token),
             { Result: var result } => result,
         };
+
+    /// <inheritdoc cref="OnFailure{TInput}(ValueTask{RopResult{TInput}}, Func{ResultBase, Task})"/>
+    public static Task<Result<TInput>> OnFailure<TInput>(this Task<RopResult<TInput>> inputTask, Func<ResultBase, Task> func) =>
+        new ValueTask<RopResult<TInput>>(inputTask).OnFailure(func);
+
+    /// <inheritdoc cref="OnFailure{TInput}(ValueTask{RopResult{TInput}}, Func{ResultBase, Task})"/>
+    public static Task<Result> OnFailure(this Task<RopResult> inputTask, Func<ResultBase, Task> func) =>
+        new ValueTask<RopResult>(inputTask).OnFailure(func);
+
+    /// <inheritdoc cref="OnFailure{TInput}(ValueTask{RopResult{TInput}}, Func{ResultBase, Task})"/>
+    public static Task<Result<TInput>> OnFailure<TInput>(this Task<RopResult<TInput>> inputTask, Action<ResultBase> func) =>
+        new ValueTask<RopResult<TInput>>(inputTask).OnFailure(func);
+
+    /// <inheritdoc cref="OnFailure{TInput}(ValueTask{RopResult{TInput}}, Func{ResultBase, Task})"/>
+    public static Task<Result> OnFailure(this Task<RopResult> inputTask, Action<ResultBase> func) =>
+        new ValueTask<RopResult>(inputTask).OnFailure(func);
+
+    /// <inheritdoc cref="OnFailure{TInput}(ValueTask{RopResult{TInput}}, Func{ResultBase, Task})"/>
+    public static Task<Result<TInput>> OnFailure<TInput>(this Task<RopResult<TInput>> inputTask, Func<ResultBase, CancellationToken, Task> func) =>
+        new ValueTask<RopResult<TInput>>(inputTask).OnFailure(func);
+
+    /// <inheritdoc cref="OnFailure{TInput}(ValueTask{RopResult{TInput}}, Func{ResultBase, Task})"/>
+    public static Task<Result> OnFailure(this Task<RopResult> inputTask, Func<ResultBase, CancellationToken, Task> func) =>
+        new ValueTask<RopResult>(inputTask).OnFailure(func);
 
     /// <summary>
     /// Вызывает обработчик ошибки и возвращает <see cref="HandledFailureError"/>.

@@ -1017,6 +1017,24 @@ public sealed class RailwayHelperTests
         #endregion
     }
 
+    [Fact(DisplayName = "PeekEach — label при сбое добавляет контекст входной коллекции")]
+    public async Task PeekEach_when_fail_with_label_attaches_input_collection_context()
+    {
+        #region Arrange
+        int[] input = [1, 2, 3];
+        #endregion
+
+        #region Act
+        RopResult<IEnumerable<int>> rop = await Do(() => (IEnumerable<int>)input, cancellationToken: TestContext.Current.CancellationToken)
+            .PeekEach(x => x == 2 ? Result.Fail("stop") : Result.Ok(), label: StepLabel);
+        #endregion
+
+        #region Assert
+        rop.Result.TryGetCallData(StepLabel, out ParametrizedError ctx).ShouldBeTrue();
+        ctx.Args.ShouldBeSameAs(input);
+        #endregion
+    }
+
     [Fact(DisplayName = "PeekEach — сбой на первом элементе прерывает последовательность")]
     public async Task PeekEach_when_first_item_fails_aborts_immediately()
     {
@@ -1159,6 +1177,27 @@ public sealed class RailwayHelperTests
         SequenceAbortedError<int> error = rop.Result.Errors[0].ShouldBeOfType<SequenceAbortedError<int>>();
         error.AbortedOn.ShouldBe(2);
         error.Reasons.ShouldContain(e => e.Message == "fail");
+        #endregion
+    }
+
+    [Fact(DisplayName = "DoEach — label при сбое добавляет контекст входной коллекции")]
+    public async Task DoEach_when_fail_with_label_attaches_input_collection_context()
+    {
+        #region Arrange
+        int[] input = [1, 2, 3];
+        #endregion
+
+        #region Act
+        RopResult<IEnumerable<int>> rop = await DoEach(
+            input,
+            x => x == 2 ? Result.Fail<int>("fail") : Result.Ok(x),
+            label: StepLabel,
+            cancellationToken: TestContext.Current.CancellationToken);
+        #endregion
+
+        #region Assert
+        rop.Result.TryGetCallData(StepLabel, out ParametrizedError ctx).ShouldBeTrue();
+        ctx.Args.ShouldBeSameAs(input);
         #endregion
     }
 
@@ -1361,6 +1400,26 @@ public sealed class RailwayHelperTests
         SequenceAbortedError<int> error = rop.Result.Errors[0].ShouldBeOfType<SequenceAbortedError<int>>();
         error.AbortedOn.ShouldBe(2);
         error.Reasons.ShouldContain(e => e.Message == "fail");
+        #endregion
+    }
+
+    [Fact(DisplayName = "NextEach — label при сбое добавляет контекст предыдущей коллекции")]
+    public async Task NextEach_when_fail_with_label_attaches_previous_collection_context()
+    {
+        #region Arrange
+        int[] input = [1, 2, 3];
+        #endregion
+
+        #region Act
+        RopResult<IEnumerable<int>> rop = await Do(() => (IEnumerable<int>)input, cancellationToken: TestContext.Current.CancellationToken)
+            .NextEach(
+                x => x == 2 ? Result.Fail<int>("fail") : Result.Ok(x),
+                label: StepLabel);
+        #endregion
+
+        #region Assert
+        rop.Result.TryGetCallData(StepLabel, out ParametrizedError ctx).ShouldBeTrue();
+        ctx.Args.ShouldBeSameAs(input);
         #endregion
     }
 
@@ -2420,6 +2479,44 @@ public sealed class RailwayHelperTests
         #region Assert
         rop.Result.IsSuccess.ShouldBeTrue();
         rop.Result.Value.ShouldBeSameAs(input);
+        #endregion
+    }
+
+    [Fact(DisplayName = "IfNoData — null handler кидает ArgumentNullException")]
+    public async Task IfNoData_when_handler_is_null_throws_argument_null_exception()
+    {
+        #region Arrange
+        #endregion
+
+        #region Act
+        Task<RopResult<IEnumerable<int>>> action() => Do(
+                () => (IEnumerable<int>)Array.Empty<int>(),
+                cancellationToken: TestContext.Current.CancellationToken)
+            .IfNoData((Action<NoDataContext>)null)
+            .AsTask();
+        #endregion
+
+        #region Assert
+        await Should.ThrowAsync<ArgumentNullException>(action);
+        #endregion
+    }
+
+    [Fact(DisplayName = "IfNoData — null async handler кидает ArgumentNullException")]
+    public async Task IfNoData_when_async_handler_is_null_throws_argument_null_exception()
+    {
+        #region Arrange
+        #endregion
+
+        #region Act
+        Task<RopResult<IEnumerable<int>>> action() => Do(
+                () => (IEnumerable<int>)Array.Empty<int>(),
+                cancellationToken: TestContext.Current.CancellationToken)
+            .IfNoData((Func<NoDataContext, Task<IEnumerable<int>>>)null)
+            .AsTask();
+        #endregion
+
+        #region Assert
+        await Should.ThrowAsync<ArgumentNullException>(action);
         #endregion
     }
 

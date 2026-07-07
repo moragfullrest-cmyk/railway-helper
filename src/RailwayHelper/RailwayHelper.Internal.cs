@@ -17,8 +17,8 @@ public static partial class RailwayHelper
     /// <param name="func">Асинхронная функция шага.</param>
     /// <param name="label">Метка шага для контекста ошибки.</param>
     /// <param name="cancellationToken">Токен отмены.</param>
-    private static Task<RopResult<TOutput>> DoInternalNoInput<TOutput>(
-        Func<CancellationToken, Task<Result<TOutput>>> func,
+    private static ValueTask<RopResult<TOutput>> DoInternalNoInput<TOutput>(
+        Func<CancellationToken, ValueTask<Result<TOutput>>> func,
         string label,
         CancellationToken cancellationToken) =>
         DoInternal<NoInput, TOutput>(default, (_, token) => func(token), label, cancellationToken, hasInput: false);
@@ -29,8 +29,8 @@ public static partial class RailwayHelper
     /// <param name="func">Асинхронная функция шага.</param>
     /// <param name="label">Метка шага для контекста ошибки.</param>
     /// <param name="cancellationToken">Токен отмены.</param>
-    private static Task<RopResult> DoSideEffectNoInput(
-        Func<CancellationToken, Task<Result>> func,
+    private static ValueTask<RopResult> DoSideEffectNoInput(
+        Func<CancellationToken, ValueTask<Result>> func,
         string label,
         CancellationToken cancellationToken) =>
         DoSideEffect<NoInput>(default, (_, token) => func(token), label, cancellationToken, hasInput: false);
@@ -43,18 +43,26 @@ public static partial class RailwayHelper
     /// <param name="func">Асинхронная функция шага.</param>
     /// <param name="label">Метка шага для контекста ошибки.</param>
     /// <param name="cancellationToken">Токен отмены.</param>
-    private static Task<RopResult> DoSideEffect<TInput>(
+    private static ValueTask<RopResult> DoSideEffect<TInput>(
         TInput input,
-        Func<TInput, CancellationToken, Task<Result>> func,
+        Func<TInput, CancellationToken, ValueTask<Result>> func,
         string label,
         CancellationToken cancellationToken,
         bool hasInput = true) =>
-        Guard(async token => (token.IsCancellationRequested, hasInput && IsNullOrEmptyCollection(input)) switch
+        Guard(token => (token.IsCancellationRequested, hasInput && IsNullOrEmptyCollection(input)) switch
         {
-            (true, _) => FailCancelled(token),
-            (_, true) => FailNoData(token),
-            _ => new RopResult(AttachContext(await func(input, token), label, hasInput ? input : null), token),
+            (true, _) => ValueTask.FromResult(FailCancelled(token)),
+            (_, true) => ValueTask.FromResult(FailNoData(token)),
+            _ => DoSideEffectExecute(input, func, label, hasInput, token),
         }, cancellationToken);
+
+    private static async ValueTask<RopResult> DoSideEffectExecute<TInput>(
+        TInput input,
+        Func<TInput, CancellationToken, ValueTask<Result>> func,
+        string label,
+        bool hasInput,
+        CancellationToken token) =>
+        new RopResult(AttachContext(await func(input, token), label, hasInput ? input : null), token);
 
     /// <summary>
     /// Внутренняя реализация <see cref="DoEach"/> с побочным эффектом для каждого элемента коллекции.
@@ -64,17 +72,24 @@ public static partial class RailwayHelper
     /// <param name="step">Асинхронная функция для элемента.</param>
     /// <param name="label">Метка шага для контекста ошибки.</param>
     /// <param name="cancellationToken">Токен отмены.</param>
-    private static Task<RopResult> DoEachSideEffect<TInput>(
+    private static ValueTask<RopResult> DoEachSideEffect<TInput>(
         IEnumerable<TInput> input,
-        Func<TInput, CancellationToken, Task<Result>> step,
+        Func<TInput, CancellationToken, ValueTask<Result>> step,
         string label,
         CancellationToken cancellationToken) =>
-        Guard(async token => (token.IsCancellationRequested, IsNullOrEmptyCollection(input)) switch
+        Guard(token => (token.IsCancellationRequested, IsNullOrEmptyCollection(input)) switch
         {
-            (true, _) => FailCancelled(token),
-            (_, true) => FailNoData(token),
-            _ => new RopResult(AttachContext(await EachCoreVoid<TInput>(input, step, token), label, input), token),
+            (true, _) => ValueTask.FromResult(FailCancelled(token)),
+            (_, true) => ValueTask.FromResult(FailNoData(token)),
+            _ => DoEachSideEffectExecute(input, step, label, token),
         }, cancellationToken);
+
+    private static async ValueTask<RopResult> DoEachSideEffectExecute<TInput>(
+        IEnumerable<TInput> input,
+        Func<TInput, CancellationToken, ValueTask<Result>> step,
+        string label,
+        CancellationToken token) =>
+        new RopResult(AttachContext(await EachCoreVoid<TInput>(input, step, token), label, input), token);
 
     /// <summary>
     /// Внутренняя реализация <see cref="NextEach"/> с побочным эффектом для каждого элемента коллекции.
@@ -83,11 +98,11 @@ public static partial class RailwayHelper
     /// <param name="input">Задача с коллекцией из предыдущего шага.</param>
     /// <param name="step">Асинхронная функция для элемента.</param>
     /// <param name="label">Метка шага для контекста ошибки.</param>
-    private static async Task<RopResult> NextEachSideEffect<TInput>(
-        Task<RopResult<IEnumerable<TInput>>> input,
-        Func<TInput, CancellationToken, Task<Result>> step,
+    private static ValueTask<RopResult> NextEachSideEffect<TInput>(
+        ValueTask<RopResult<IEnumerable<TInput>>> input,
+        Func<TInput, CancellationToken, ValueTask<Result>> step,
         string label) =>
-        await NextSideEffectInternal<IEnumerable<TInput>>(input, (v, token) => EachCoreVoid<TInput>(v, step, token), label);
+        NextSideEffectInternal<IEnumerable<TInput>>(input, (v, token) => EachCoreVoid<TInput>(v, step, token), label);
 
     /// <summary>
     /// Внутренняя реализация <see cref="Peek"/>: побочный эффект над значением предыдущего шага без его изменения.
@@ -96,22 +111,17 @@ public static partial class RailwayHelper
     /// <param name="inputTask">Задача с результатом предыдущего шага.</param>
     /// <param name="func">Асинхронная функция шага.</param>
     /// <param name="label">Метка шага для контекста ошибки.</param>
-    private static async Task<RopResult<TInput>> PeekInternal<TInput>(
-        Task<RopResult<TInput>> inputTask,
-        Func<TInput, CancellationToken, Task<Result>> func,
+    private static ValueTask<RopResult<TInput>> PeekInternal<TInput>(
+        ValueTask<RopResult<TInput>> inputTask,
+        Func<TInput, CancellationToken, ValueTask<Result>> func,
         string label = null) =>
-        await ExecutePipelineStep(inputTask, async (previous, token) =>
+        ExecutePipelineStep(inputTask, (previous, token) =>
             (previous.Token.IsCancellationRequested, previous.Result) switch
             {
-                (true, _) => FailCancelled<TInput>(token),
-                (_, { IsSuccess: false, Errors: var errors }) => FailWithErrors<TInput>(errors, token),
-                (_, { IsSuccess: true, Value: null }) => FailNoData<TInput>(token),
-                (_, { IsSuccess: true, Value: var value }) => await func(value, token) switch
-                {
-                    { IsSuccess: false, Errors: var errors } =>
-                        new RopResult<TInput>(AttachContext<TInput>(Result.Fail<TInput>(errors), label, value), token),
-                    _ => new RopResult<TInput>(Result.Ok(value), token),
-                },
+                (true, _) => ValueTask.FromResult(FailCancelled<TInput>(token)),
+                (_, { IsSuccess: false, Errors: var errors }) => ValueTask.FromResult(FailWithErrors<TInput>(errors, token)),
+                (_, { IsSuccess: true, Value: null }) => ValueTask.FromResult(FailNoData<TInput>(token)),
+                (_, { IsSuccess: true, Value: var value }) => PeekInternalSuccess(func, value, label, token),
             });
 
     /// <summary>
@@ -121,18 +131,23 @@ public static partial class RailwayHelper
     /// <param name="input">Задача с коллекцией из предыдущего шага.</param>
     /// <param name="step">Асинхронная функция для элемента.</param>
     /// <param name="label">Метка шага для контекста ошибки.</param>
-    private static async Task<RopResult<IEnumerable<TInput>>> PeekEachInternal<TInput>(
-        Task<RopResult<IEnumerable<TInput>>> input,
-        Func<TInput, CancellationToken, Task<Result>> step,
+    private static ValueTask<RopResult<IEnumerable<TInput>>> PeekEachInternal<TInput>(
+        ValueTask<RopResult<IEnumerable<TInput>>> input,
+        Func<TInput, CancellationToken, ValueTask<Result>> step,
         string label) =>
-        await NextInternal<IEnumerable<TInput>, IEnumerable<TInput>>(
+        NextInternal<IEnumerable<TInput>, IEnumerable<TInput>>(
             input,
-            async (items, token) =>
-            {
-                Result voidResult = await EachCoreVoid(items, step, token);
-                return voidResult.IsSuccess ? Result.Ok(items) : voidResult;
-            },
+            (items, token) => PeekEachInternalStep(items, step, token),
             label);
+
+    private static async ValueTask<Result<IEnumerable<TInput>>> PeekEachInternalStep<TInput>(
+        IEnumerable<TInput> items,
+        Func<TInput, CancellationToken, ValueTask<Result>> step,
+        CancellationToken token)
+    {
+        Result voidResult = await EachCoreVoid(items, step, token);
+        return voidResult.IsSuccess ? Result.Ok(items) : voidResult;
+    }
 
     /// <summary>
     /// Проверяет, что значение равно <c>null</c> или является пустой коллекцией (кроме <see cref="string"/>).
@@ -204,20 +219,20 @@ public static partial class RailwayHelper
     /// <summary>Преобразует <see cref="RopResult{IReadOnlyCollection}"/> в <see cref="RopResult{IEnumerable}"/>.</summary>
     /// <typeparam name="T">Тип элемента коллекции.</typeparam>
     /// <param name="inputTask">Задача с результатом предыдущего шага.</param>
-    private static Task<RopResult<IEnumerable<T>>> AsEnumerable<T>(Task<RopResult<IReadOnlyCollection<T>>> inputTask) =>
+    private static ValueTask<RopResult<IEnumerable<T>>> AsEnumerable<T>(ValueTask<RopResult<IReadOnlyCollection<T>>> inputTask) =>
         AsEnumerableCore<T, IReadOnlyCollection<T>>(inputTask);
 
     /// <summary>Преобразует <see cref="RopResult{ICollection}"/> в <see cref="RopResult{IEnumerable}"/>.</summary>
     /// <typeparam name="T">Тип элемента коллекции.</typeparam>
     /// <param name="inputTask">Задача с результатом предыдущего шага.</param>
-    private static Task<RopResult<IEnumerable<T>>> AsEnumerable<T>(Task<RopResult<ICollection<T>>> inputTask) =>
+    private static ValueTask<RopResult<IEnumerable<T>>> AsEnumerable<T>(ValueTask<RopResult<ICollection<T>>> inputTask) =>
         AsEnumerableCore<T, ICollection<T>>(inputTask);
 
     /// <summary>Преобразует <see cref="RopResult{TCollection}"/> в <see cref="RopResult{IEnumerable}"/>.</summary>
     /// <typeparam name="T">Тип элемента коллекции.</typeparam>
     /// <typeparam name="TCollection">Тип исходной коллекции.</typeparam>
     /// <param name="inputTask">Задача с результатом предыдущего шага.</param>
-    private static async Task<RopResult<IEnumerable<T>>> AsEnumerableCore<T, TCollection>(Task<RopResult<TCollection>> inputTask)
+    private static async ValueTask<RopResult<IEnumerable<T>>> AsEnumerableCore<T, TCollection>(ValueTask<RopResult<TCollection>> inputTask)
         where TCollection : IEnumerable<T>
     {
         RopResult<TCollection> previous = await inputTask;
@@ -235,7 +250,7 @@ public static partial class RailwayHelper
     /// <returns>Накопленные результаты, элемент прерывания и ошибочный результат итерации.</returns>
     private static async Task<(IEnumerable<TOutput>, TInput, Result)> SelectEachAsync<TInput, TOutput>(
     IEnumerable<TInput> items,
-    Func<TInput, CancellationToken, Task<Result<TOutput>>> step,
+    Func<TInput, CancellationToken, ValueTask<Result<TOutput>>> step,
     CancellationToken token)
     {
         var result = new List<TOutput>();
@@ -267,20 +282,28 @@ public static partial class RailwayHelper
     /// <param name="func">Асинхронная функция преобразования.</param>
     /// <param name="label">Метка шага для контекста ошибки.</param>
     /// <param name="cancellationToken">Токен отмены.</param>
-    private static Task<RopResult<TOutput>> DoInternal<TInput, TOutput>(
+    private static ValueTask<RopResult<TOutput>> DoInternal<TInput, TOutput>(
        TInput input,
-       Func<TInput, CancellationToken, Task<Result<TOutput>>> func,
+       Func<TInput, CancellationToken, ValueTask<Result<TOutput>>> func,
        string label,
        CancellationToken cancellationToken,
        bool hasInput = true) =>
-     Guard<TOutput>(async token => (token.IsCancellationRequested, hasInput && IsNullOrEmptyCollection<TInput>(input)) switch
+     Guard<TOutput>(token => (token.IsCancellationRequested, hasInput && IsNullOrEmptyCollection<TInput>(input)) switch
      {
-         (true, _) => FailCancelled<TOutput>(token),
-         (_, true) => FailNoData<TOutput>(token),
-         _ => new RopResult<TOutput>(
-             AttachContext<TOutput>(await func(input, token), label, hasInput ? input : null),
-             token),
+         (true, _) => ValueTask.FromResult(FailCancelled<TOutput>(token)),
+         (_, true) => ValueTask.FromResult(FailNoData<TOutput>(token)),
+         _ => DoInternalExecute(input, func, label, hasInput, token),
      }, cancellationToken);
+
+    private static async ValueTask<RopResult<TOutput>> DoInternalExecute<TInput, TOutput>(
+        TInput input,
+        Func<TInput, CancellationToken, ValueTask<Result<TOutput>>> func,
+        string label,
+        bool hasInput,
+        CancellationToken token) =>
+        new RopResult<TOutput>(
+            AttachContext<TOutput>(await func(input, token), label, hasInput ? input : null),
+            token);
 
     /// <summary>
     /// Внутренняя реализация <see cref="Next"/> с преобразованием значения предыдущего шага.
@@ -290,16 +313,37 @@ public static partial class RailwayHelper
     /// <param name="inputTask">Задача с результатом предыдущего шага.</param>
     /// <param name="func">Асинхронная функция преобразования.</param>
     /// <param name="label">Метка шага для контекста ошибки.</param>
-    private static async Task<RopResult<TOutput>> NextInternal<TInput, TOutput>(Task<RopResult<TInput>> inputTask, Func<TInput, CancellationToken, Task<Result<TOutput>>> func, string label = null) =>
-        await ExecutePipelineStep(inputTask, async (previous, token) =>
+    private static ValueTask<RopResult<TOutput>> NextInternal<TInput, TOutput>(
+        ValueTask<RopResult<TInput>> inputTask,
+        Func<TInput, CancellationToken, ValueTask<Result<TOutput>>> func,
+        string label = null) =>
+        ExecutePipelineStep(inputTask, (previous, token) =>
             (previous.Token.IsCancellationRequested, previous.Result) switch
             {
-                (true, _) => FailCancelled<TOutput>(token),
-                (_, { IsSuccess: false, Errors: var errors }) => FailWithErrors<TOutput>(errors, token),
-                (_, { IsSuccess: true, Value: null }) => FailNoData<TOutput>(token),
-                (_, { IsSuccess: true, Value: var value }) =>
-                    new RopResult<TOutput>(AttachContext<TOutput>(await func(value, token), label, value), token),
+                (true, _) => ValueTask.FromResult(FailCancelled<TOutput>(token)),
+                (_, { IsSuccess: false, Errors: var errors }) => ValueTask.FromResult(FailWithErrors<TOutput>(errors, token)),
+                (_, { IsSuccess: true, Value: null }) => ValueTask.FromResult(FailNoData<TOutput>(token)),
+                (_, { IsSuccess: true, Value: var value }) => NextInternalSuccess(func, value, label, token),
             });
+
+    private static async ValueTask<RopResult<TOutput>> NextInternalSuccess<TInput, TOutput>(
+        Func<TInput, CancellationToken, ValueTask<Result<TOutput>>> func,
+        TInput value,
+        string label,
+        CancellationToken token) =>
+        new RopResult<TOutput>(AttachContext<TOutput>(await func(value, token), label, value), token);
+
+    private static async ValueTask<RopResult<TInput>> PeekInternalSuccess<TInput>(
+        Func<TInput, CancellationToken, ValueTask<Result>> func,
+        TInput value,
+        string label,
+        CancellationToken token) =>
+        await func(value, token) switch
+        {
+            { IsSuccess: false, Errors: var errors } =>
+                new RopResult<TInput>(AttachContext<TInput>(Result.Fail<TInput>(errors), label, value), token),
+            _ => new RopResult<TInput>(Result.Ok(value), token),
+        };
 
     /// <summary>
     /// Внутренняя реализация <see cref="Next"/> с побочным эффектом над значением предыдущего шага.
@@ -308,19 +352,25 @@ public static partial class RailwayHelper
     /// <param name="inputTask">Задача с результатом предыдущего шага.</param>
     /// <param name="func">Асинхронная функция шага.</param>
     /// <param name="label">Метка шага для контекста ошибки.</param>
-    private static async Task<RopResult> NextSideEffectInternal<TInput>(
-        Task<RopResult<TInput>> inputTask,
-        Func<TInput, CancellationToken, Task<Result>> func,
+    private static ValueTask<RopResult> NextSideEffectInternal<TInput>(
+        ValueTask<RopResult<TInput>> inputTask,
+        Func<TInput, CancellationToken, ValueTask<Result>> func,
         string label = null) =>
-        await ExecutePipelineStep(inputTask, async (previous, token) =>
+        ExecutePipelineStep(inputTask, (previous, token) =>
             (previous.Token.IsCancellationRequested, previous.Result) switch
             {
-                (true, _) => FailCancelled(token),
-                (_, { IsSuccess: false, Errors: var errors }) => FailWithErrors(errors, token),
-                (_, { IsSuccess: true, Value: null }) => FailNoData(token),
-                (_, { IsSuccess: true, Value: var value }) =>
-                    new RopResult(AttachContext(await func(value, token), label, value), token),
+                (true, _) => ValueTask.FromResult(FailCancelled(token)),
+                (_, { IsSuccess: false, Errors: var errors }) => ValueTask.FromResult(FailWithErrors(errors, token)),
+                (_, { IsSuccess: true, Value: null }) => ValueTask.FromResult(FailNoData(token)),
+                (_, { IsSuccess: true, Value: var value }) => NextSideEffectInternalSuccess(func, value, label, token),
             });
+
+    private static async ValueTask<RopResult> NextSideEffectInternalSuccess<TInput>(
+        Func<TInput, CancellationToken, ValueTask<Result>> func,
+        TInput value,
+        string label,
+        CancellationToken token) =>
+        new RopResult(AttachContext(await func(value, token), label, value), token);
 
     /// <summary>
     /// Внутренняя реализация <see cref="Next"/> с побочным эффектом после шага без значения.
@@ -328,17 +378,23 @@ public static partial class RailwayHelper
     /// <param name="inputTask">Задача с результатом предыдущего шага.</param>
     /// <param name="func">Асинхронная функция шага.</param>
     /// <param name="label">Метка шага для контекста ошибки.</param>
-    private static async Task<RopResult> NextSideEffectInternal(
-        Task<RopResult> inputTask,
-        Func<CancellationToken, Task<Result>> func,
+    private static ValueTask<RopResult> NextSideEffectInternal(
+        ValueTask<RopResult> inputTask,
+        Func<CancellationToken, ValueTask<Result>> func,
         string label = null) =>
-        await ExecutePipelineStep(inputTask, async (previous, token) =>
+        ExecutePipelineStep(inputTask, (previous, token) =>
             (previous.Token.IsCancellationRequested, previous.Result) switch
             {
-                (true, _) => FailCancelled(token),
-                (_, { IsSuccess: false, Errors: var errors }) => FailWithErrors(errors, token),
-                (_, { IsSuccess: true }) => new RopResult(AttachContext(await func(token), label, null), token),
+                (true, _) => ValueTask.FromResult(FailCancelled(token)),
+                (_, { IsSuccess: false, Errors: var errors }) => ValueTask.FromResult(FailWithErrors(errors, token)),
+                (_, { IsSuccess: true }) => NextSideEffectInternalSuccess(func, label, token),
             });
+
+    private static async ValueTask<RopResult> NextSideEffectInternalSuccess(
+        Func<CancellationToken, ValueTask<Result>> func,
+        string label,
+        CancellationToken token) =>
+        new RopResult(AttachContext(await func(token), label, null), token);
 
     /// <summary>
     /// Внутренняя реализация <see cref="Next"/> с возвратом нового значения после шага без значения.
@@ -347,107 +403,246 @@ public static partial class RailwayHelper
     /// <param name="inputTask">Задача с результатом предыдущего шага.</param>
     /// <param name="func">Асинхронная функция шага.</param>
     /// <param name="label">Метка шага для контекста ошибки.</param>
-    private static async Task<RopResult<TOutput>> NextValueInternal<TOutput>(
-        Task<RopResult> inputTask,
-        Func<CancellationToken, Task<Result<TOutput>>> func,
+    private static ValueTask<RopResult<TOutput>> NextValueInternal<TOutput>(
+        ValueTask<RopResult> inputTask,
+        Func<CancellationToken, ValueTask<Result<TOutput>>> func,
         string label = null) =>
-        await ExecutePipelineStep(inputTask, async (previous, token) =>
+        ExecutePipelineStep(inputTask, (previous, token) =>
             (previous.Token.IsCancellationRequested, previous.Result) switch
             {
-                (true, _) => FailCancelled<TOutput>(token),
-                (_, { IsSuccess: false, Errors: var errors }) => FailWithErrors<TOutput>(errors, token),
-                (_, { IsSuccess: true }) =>
-                    new RopResult<TOutput>(AttachContext<TOutput>(await func(token), label, null), token),
+                (true, _) => ValueTask.FromResult(FailCancelled<TOutput>(token)),
+                (_, { IsSuccess: false, Errors: var errors }) => ValueTask.FromResult(FailWithErrors<TOutput>(errors, token)),
+                (_, { IsSuccess: true }) => NextValueInternalSuccess(func, label, token),
             });
+
+    private static async ValueTask<RopResult<TOutput>> NextValueInternalSuccess<TOutput>(
+        Func<CancellationToken, ValueTask<Result<TOutput>>> func,
+        string label,
+        CancellationToken token) =>
+        new RopResult<TOutput>(AttachContext<TOutput>(await func(token), label, null), token);
 
     /// <summary>
     /// Адаптеры делегатов публичного API к унифицированным сигнатурам шагов pipeline.
     /// </summary>
     private static class Lift
     {
-        /// <summary>Преобразует синхронный делегат без входа в <see cref="Func{CancellationToken, Task{Result}}"/>.</summary>
-        public static Func<CancellationToken, Task<Result<TOutput>>> FromNoInput<TOutput>(Func<TOutput> f)
-            => token => Task.FromResult(Result.Ok<TOutput>(f()));
-        public static Func<CancellationToken, Task<Result<TOutput>>> FromNoInput<TOutput>(Func<Task<TOutput>> f)
-            => async token => Result.Ok<TOutput>(await f());
-        public static Func<CancellationToken, Task<Result<TOutput>>> FromNoInput<TOutput>(Func<Result<TOutput>> f)
-            => token => Task.FromResult(f());
-        public static Func<CancellationToken, Task<Result<TOutput>>> FromNoInput<TOutput>(Func<Task<Result<TOutput>>> f)
-            => async token => await f();
-        public static Func<CancellationToken, Task<Result<TOutput>>> FromNoInput<TOutput>(Func<CancellationToken, TOutput> f)
-            => token => Task.FromResult(Result.Ok<TOutput>(f(token)));
-        public static Func<CancellationToken, Task<Result<TOutput>>> FromNoInput<TOutput>(Func<CancellationToken, Result<TOutput>> f)
-            => token => Task.FromResult(f(token));
-        public static Func<CancellationToken, Task<Result<TOutput>>> FromNoInput<TOutput>(Func<CancellationToken, Task<TOutput>> f)
-            => async token => Result.Ok<TOutput>(await f(token));
-        public static Func<CancellationToken, Task<Result<TOutput>>> FromNoInput<TOutput>(Func<CancellationToken, Task<Result<TOutput>>> f)
-            => f;
+        /// <summary>Преобразует синхронный делегат без входа в <see cref="Func{CancellationToken, ValueTask{Result}}"/>.</summary>
+        public static Func<CancellationToken, ValueTask<Result<TOutput>>> FromNoInput<TOutput>(Func<TOutput> f)
+        {
+            var handler = EnsureHandler(f);
+            return token => ValueTask.FromResult(Result.Ok<TOutput>(handler()));
+        }
+        public static Func<CancellationToken, ValueTask<Result<TOutput>>> FromNoInput<TOutput>(Func<Task<TOutput>> f)
+        {
+            var handler = EnsureHandler(f);
+            return _ => LiftOk(handler());
+        }
+        public static Func<CancellationToken, ValueTask<Result<TOutput>>> FromNoInput<TOutput>(Func<Result<TOutput>> f)
+        {
+            var handler = EnsureHandler(f);
+            return token => ValueTask.FromResult(handler());
+        }
+        public static Func<CancellationToken, ValueTask<Result<TOutput>>> FromNoInput<TOutput>(Func<Task<Result<TOutput>>> f)
+        {
+            var handler = EnsureHandler(f);
+            return ct => new ValueTask<Result<TOutput>>(handler());
+        }
+        public static Func<CancellationToken, ValueTask<Result<TOutput>>> FromNoInput<TOutput>(Func<CancellationToken, TOutput> f)
+        {
+            var handler = EnsureHandler(f);
+            return token => ValueTask.FromResult(Result.Ok<TOutput>(handler(token)));
+        }
+        public static Func<CancellationToken, ValueTask<Result<TOutput>>> FromNoInput<TOutput>(Func<CancellationToken, Result<TOutput>> f)
+        {
+            var handler = EnsureHandler(f);
+            return token => ValueTask.FromResult(handler(token));
+        }
+        public static Func<CancellationToken, ValueTask<Result<TOutput>>> FromNoInput<TOutput>(Func<CancellationToken, Task<TOutput>> f)
+        {
+            var handler = EnsureHandler(f);
+            return token => LiftOk(handler(token));
+        }
+        public static Func<CancellationToken, ValueTask<Result<TOutput>>> FromNoInput<TOutput>(Func<CancellationToken, Task<Result<TOutput>>> f)
+        {
+            var handler = EnsureHandler(f);
+            return ct => new ValueTask<Result<TOutput>>(handler(ct));
+        }
 
-        /// <summary>Преобразует синхронный void-делегат без входа в <see cref="Func{CancellationToken, Task{Result}}"/>.</summary>
-        public static Func<CancellationToken, Task<Result>> FromNoInputVoid(Action f)
-            => token => { f(); return Task.FromResult(Result.Ok()); };
-        public static Func<CancellationToken, Task<Result>> FromNoInputVoid(Func<Task> f)
-            => async token => { await f(); return Result.Ok(); };
-        public static Func<CancellationToken, Task<Result>> FromNoInputVoid(Func<Result> f)
-            => token => Task.FromResult(f());
-        public static Func<CancellationToken, Task<Result>> FromNoInputVoid(Func<Task<Result>> f)
-            => async token => await f();
-        public static Func<CancellationToken, Task<Result>> FromNoInputVoid(Action<CancellationToken> f)
-            => token => { f(token); return Task.FromResult(Result.Ok()); };
-        public static Func<CancellationToken, Task<Result>> FromNoInputVoid(Func<CancellationToken, Task> f)
-            => async token => { await f(token); return Result.Ok(); };
-        public static Func<CancellationToken, Task<Result>> FromNoInputVoid(Func<CancellationToken, Result> f)
-            => token => Task.FromResult(f(token));
-        public static Func<CancellationToken, Task<Result>> FromNoInputVoid(Func<CancellationToken, Task<Result>> f)
-            => f;
+        /// <summary>Преобразует синхронный void-делегат без входа в <see cref="Func{CancellationToken, ValueTask{Result}}"/>.</summary>
+        public static Func<CancellationToken, ValueTask<Result>> FromNoInputVoid(Action f)
+        {
+            var handler = EnsureHandler(f);
+            return token => { handler(); return ValueTask.FromResult(Result.Ok()); };
+        }
+        public static Func<CancellationToken, ValueTask<Result>> FromNoInputVoid(Func<Task> f)
+        {
+            var handler = EnsureHandler(f);
+            return _ => LiftVoid(handler());
+        }
+        public static Func<CancellationToken, ValueTask<Result>> FromNoInputVoid(Func<Result> f)
+        {
+            var handler = EnsureHandler(f);
+            return token => ValueTask.FromResult(handler());
+        }
+        public static Func<CancellationToken, ValueTask<Result>> FromNoInputVoid(Func<Task<Result>> f)
+        {
+            var handler = EnsureHandler(f);
+            return ct => new ValueTask<Result>(handler());
+        }
+        public static Func<CancellationToken, ValueTask<Result>> FromNoInputVoid(Action<CancellationToken> f)
+        {
+            var handler = EnsureHandler(f);
+            return token => { handler(token); return ValueTask.FromResult(Result.Ok()); };
+        }
+        public static Func<CancellationToken, ValueTask<Result>> FromNoInputVoid(Func<CancellationToken, Task> f)
+        {
+            var handler = EnsureHandler(f);
+            return token => LiftVoid(handler(token));
+        }
+        public static Func<CancellationToken, ValueTask<Result>> FromNoInputVoid(Func<CancellationToken, Result> f)
+        {
+            var handler = EnsureHandler(f);
+            return token => ValueTask.FromResult(handler(token));
+        }
+        public static Func<CancellationToken, ValueTask<Result>> FromNoInputVoid(Func<CancellationToken, Task<Result>> f)
+        {
+            var handler = EnsureHandler(f);
+            return ct => new ValueTask<Result>(handler(ct));
+        }
 
-        /// <summary>Преобразует void-делегат с входом в <see cref="Func{TInput, CancellationToken, Task{Result}}"/>.</summary>
-        public static Func<TInput, CancellationToken, Task<Result>> FromVoid<TInput>(Action<TInput> f)
-            => async (x, _) => { f(x); return Result.Ok(); };
-        public static Func<TInput, CancellationToken, Task<Result>> FromVoid<TInput>(Action f)
-            => async (x, _) => { f(); return Result.Ok(); };
-        public static Func<TInput, CancellationToken, Task<Result>> FromVoid<TInput>(Func<Task> f)
-            => async (x, _) => { await f(); return Result.Ok(); };
-        public static Func<TInput, CancellationToken, Task<Result>> FromVoid<TInput>(Func<TInput, Task> f)
-            => async (x, _) => { await f(x); return Result.Ok(); };
-        public static Func<TInput, CancellationToken, Task<Result>> FromVoid<TInput>(Func<TInput, Result> f)
-            => async (x, _) => f(x);
-        public static Func<TInput, CancellationToken, Task<Result>> FromVoid<TInput>(Func<TInput, Task<Result>> f)
-            => async (x, _) => await f(x);
-        public static Func<TInput, CancellationToken, Task<Result>> FromVoid<TInput>(Action<TInput, CancellationToken> f)
-            => async (x, ct) => { f(x, ct); return Result.Ok(); };
-        public static Func<TInput, CancellationToken, Task<Result>> FromVoid<TInput>(Func<TInput, CancellationToken, Task> f)
-            => async (x, ct) => { await f(x, ct); return Result.Ok(); };
-        public static Func<TInput, CancellationToken, Task<Result>> FromVoid<TInput>(Func<TInput, CancellationToken, Result> f)
-            => async (x, ct) => f(x, ct);
-        public static Func<TInput, CancellationToken, Task<Result>> FromVoid<TInput>(Func<TInput, CancellationToken, Task<Result>> f)
-            => f;
-        public static Func<TInput, CancellationToken, Task<Result>> FromVoid<TInput>(Func<CancellationToken, Task> f)
-            => async (_, ct) => { await f(ct); return Result.Ok(); };
-        public static Func<TInput, CancellationToken, Task<Result>> FromVoid<TInput>(Func<CancellationToken, Result> f)
-            => async (_, ct) => f(ct);
-        public static Func<TInput, CancellationToken, Task<Result>> FromVoid<TInput>(Func<CancellationToken, Task<Result>> f)
-            => async (_, ct) => await f(ct);
-        public static Func<TInput, CancellationToken, Task<Result>> FromVoid<TInput>(Action<CancellationToken> f)
-            => async (_, ct) => { f(ct); return Result.Ok(); };
+        /// <summary>Преобразует void-делегат с входом в <see cref="Func{TInput, CancellationToken, ValueTask{Result}}"/>.</summary>
+        public static Func<TInput, CancellationToken, ValueTask<Result>> FromVoid<TInput>(Action<TInput> f)
+        {
+            var handler = EnsureHandler(f);
+            return (x, _) =>
+            {
+                handler(x);
+                return ValueTask.FromResult(Result.Ok());
+            };
+        }
+        public static Func<TInput, CancellationToken, ValueTask<Result>> FromVoid<TInput>(Action f)
+        {
+            var handler = EnsureHandler(f);
+            return (x, _) =>
+            {
+                handler();
+                return ValueTask.FromResult(Result.Ok());
+            };
+        }
+        public static Func<TInput, CancellationToken, ValueTask<Result>> FromVoid<TInput>(Func<Task> f)
+        {
+            var handler = EnsureHandler(f);
+            return (_, _) => LiftVoid(handler());
+        }
+        public static Func<TInput, CancellationToken, ValueTask<Result>> FromVoid<TInput>(Func<TInput, Task> f)
+        {
+            var handler = EnsureHandler(f);
+            return (x, _) => LiftVoid(handler(x));
+        }
+        public static Func<TInput, CancellationToken, ValueTask<Result>> FromVoid<TInput>(Func<TInput, Result> f)
+        {
+            var handler = EnsureHandler(f);
+            return (x, _) => ValueTask.FromResult(handler(x));
+        }
+        public static Func<TInput, CancellationToken, ValueTask<Result>> FromVoid<TInput>(Func<TInput, Task<Result>> f)
+        {
+            var handler = EnsureHandler(f);
+            return (x, _) => new ValueTask<Result>(handler(x));
+        }
+        public static Func<TInput, CancellationToken, ValueTask<Result>> FromVoid<TInput>(Action<TInput, CancellationToken> f)
+        {
+            var handler = EnsureHandler(f);
+            return (x, ct) =>
+            {
+                handler(x, ct);
+                return ValueTask.FromResult(Result.Ok());
+            };
+        }
+        public static Func<TInput, CancellationToken, ValueTask<Result>> FromVoid<TInput>(Func<TInput, CancellationToken, Task> f)
+        {
+            var handler = EnsureHandler(f);
+            return (x, ct) => LiftVoid(handler(x, ct));
+        }
+        public static Func<TInput, CancellationToken, ValueTask<Result>> FromVoid<TInput>(Func<TInput, CancellationToken, Result> f)
+        {
+            var handler = EnsureHandler(f);
+            return (x, ct) => ValueTask.FromResult(handler(x, ct));
+        }
+        public static Func<TInput, CancellationToken, ValueTask<Result>> FromVoid<TInput>(Func<TInput, CancellationToken, Task<Result>> f)
+        {
+            var handler = EnsureHandler(f);
+            return (x, ct) => new ValueTask<Result>(handler(x, ct));
+        }
+        public static Func<TInput, CancellationToken, ValueTask<Result>> FromVoid<TInput>(Func<CancellationToken, Task> f)
+        {
+            var handler = EnsureHandler(f);
+            return (_, ct) => LiftVoid(handler(ct));
+        }
+        public static Func<TInput, CancellationToken, ValueTask<Result>> FromVoid<TInput>(Func<CancellationToken, Result> f)
+        {
+            var handler = EnsureHandler(f);
+            return (_, ct) => ValueTask.FromResult(handler(ct));
+        }
+        public static Func<TInput, CancellationToken, ValueTask<Result>> FromVoid<TInput>(Func<CancellationToken, Task<Result>> f)
+        {
+            var handler = EnsureHandler(f);
+            return (_, ct) => new ValueTask<Result>(handler(ct));
+        }
+        public static Func<TInput, CancellationToken, ValueTask<Result>> FromVoid<TInput>(Action<CancellationToken> f)
+        {
+            var handler = EnsureHandler(f);
+            return (_, ct) =>
+            {
+                handler(ct);
+                return ValueTask.FromResult(Result.Ok());
+            };
+        }
 
-        /// <summary>Преобразует делегат с входом в <see cref="Func{TInput, CancellationToken, Task{Result}}"/>.</summary>
-        public static Func<TInput, CancellationToken, Task<Result<TOutput>>> From<TInput, TOutput>(Func<TInput, TOutput> f)
-            => (x, _) => Task.FromResult(Result.Ok<TOutput>(f(x)));
-        public static Func<TInput, CancellationToken, Task<Result<TOutput>>> From<TInput, TOutput>(Func<TInput, Result<TOutput>> f)
-            => (x, _) => Task.FromResult(f(x));
-        public static Func<TInput, CancellationToken, Task<Result<TOutput>>> From<TInput, TOutput>(Func<TInput, Task<TOutput>> f)
-            => async (x, _) => Result.Ok<TOutput>(await f(x));
-        public static Func<TInput, CancellationToken, Task<Result<TOutput>>> From<TInput, TOutput>(Func<TInput, Task<Result<TOutput>>> f)
-            => async (x, _) => await f(x);
-        public static Func<TInput, CancellationToken, Task<Result<TOutput>>> From<TInput, TOutput>(Func<TInput, CancellationToken, TOutput> f)
-            => (x, ct) => Task.FromResult(Result.Ok<TOutput>(f(x, ct)));
-        public static Func<TInput, CancellationToken, Task<Result<TOutput>>> From<TInput, TOutput>(Func<TInput, CancellationToken, Result<TOutput>> f)
-            => (x, ct) => Task.FromResult(f(x, ct));
-        public static Func<TInput, CancellationToken, Task<Result<TOutput>>> From<TInput, TOutput>(Func<TInput, CancellationToken, Task<TOutput>> f)
-            => async (x, ct) => Result.Ok<TOutput>(await f(x, ct));
-        public static Func<TInput, CancellationToken, Task<Result<TOutput>>> From<TInput, TOutput>(Func<TInput, CancellationToken, Task<Result<TOutput>>> f)
-            => f;
+        /// <summary>Преобразует делегат с входом в <see cref="Func{TInput, CancellationToken, ValueTask{Result}}"/>.</summary>
+        public static Func<TInput, CancellationToken, ValueTask<Result<TOutput>>> From<TInput, TOutput>(Func<TInput, TOutput> f)
+        {
+            var handler = EnsureHandler(f);
+            return (x, _) => ValueTask.FromResult(Result.Ok<TOutput>(handler(x)));
+        }
+        public static Func<TInput, CancellationToken, ValueTask<Result<TOutput>>> From<TInput, TOutput>(Func<TInput, Result<TOutput>> f)
+        {
+            var handler = EnsureHandler(f);
+            return (x, _) => ValueTask.FromResult(handler(x));
+        }
+        public static Func<TInput, CancellationToken, ValueTask<Result<TOutput>>> From<TInput, TOutput>(Func<TInput, Task<TOutput>> f)
+        {
+            var handler = EnsureHandler(f);
+            return (x, _) => LiftOk(handler(x));
+        }
+        public static Func<TInput, CancellationToken, ValueTask<Result<TOutput>>> From<TInput, TOutput>(Func<TInput, Task<Result<TOutput>>> f)
+        {
+            var handler = EnsureHandler(f);
+            return (x, _) => new ValueTask<Result<TOutput>>(handler(x));
+        }
+        public static Func<TInput, CancellationToken, ValueTask<Result<TOutput>>> From<TInput, TOutput>(Func<TInput, CancellationToken, TOutput> f)
+        {
+            var handler = EnsureHandler(f);
+            return (x, ct) => ValueTask.FromResult(Result.Ok<TOutput>(handler(x, ct)));
+        }
+        public static Func<TInput, CancellationToken, ValueTask<Result<TOutput>>> From<TInput, TOutput>(Func<TInput, CancellationToken, Result<TOutput>> f)
+        {
+            var handler = EnsureHandler(f);
+            return (x, ct) => ValueTask.FromResult(handler(x, ct));
+        }
+        public static Func<TInput, CancellationToken, ValueTask<Result<TOutput>>> From<TInput, TOutput>(Func<TInput, CancellationToken, Task<TOutput>> f)
+        {
+            var handler = EnsureHandler(f);
+            return (x, ct) => LiftOk(handler(x, ct));
+        }
+        public static Func<TInput, CancellationToken, ValueTask<Result<TOutput>>> From<TInput, TOutput>(Func<TInput, CancellationToken, Task<Result<TOutput>>> f)
+        {
+            var handler = EnsureHandler(f);
+            return (x, ct) => new ValueTask<Result<TOutput>>(handler(x, ct));
+        }
+
+        private static TDelegate EnsureHandler<TDelegate>(TDelegate handler)
+            where TDelegate : class =>
+            handler ?? throw new ArgumentNullException(nameof(handler));
     }
 
     /// <summary>
@@ -456,45 +651,50 @@ public static partial class RailwayHelper
     /// <typeparam name="TCollection">Тип коллекции pipeline.</typeparam>
     /// <param name="inputTask">Задача с результатом предыдущего шага.</param>
     /// <param name="onNoData">Обработчик пустой коллекции.</param>
-    private static async Task<RopResult<TCollection>> IfNoDataCore<TCollection>(
-        Task<RopResult<TCollection>> inputTask,
-        Func<NoDataContext, CancellationToken, Task<Result<TCollection>>> onNoData)
+    private static ValueTask<RopResult<TCollection>> IfNoDataCore<TCollection>(
+        ValueTask<RopResult<TCollection>> inputTask,
+        Func<NoDataContext, CancellationToken, ValueTask<Result<TCollection>>> onNoData)
         where TCollection : IEnumerable
     {
         ArgumentNullException.ThrowIfNull(onNoData);
-        return await ExecutePipelineStep(inputTask, async (previous, token) =>
+        return ExecutePipelineStep(inputTask, (previous, token) =>
         {
-            async Task<RopResult<TCollection>> HandleEmptyCollectionAsync(TCollection incoming)
+            if (previous.Token.IsCancellationRequested)
+                return ValueTask.FromResult(FailCancelled<TCollection>(token));
+
+            return previous.Result switch
             {
-                NoDataContext context = new(token);
-                Result<TCollection> handlerResult = await onNoData(context, token);
-
-                return (token.IsCancellationRequested, context.IsTerminated, handlerResult) switch
-                {
-                    (true, _, _) => FailCancelled<TCollection>(token),
-                    (_, true, _) => FailPipelineTerminated<TCollection>(token),
-                    (_, _, { IsSuccess: false, Errors: var errors }) =>
-                        FailWithErrors<TCollection>(errors, token),
-                    (_, _, { IsSuccess: true, Value: null }) =>
-                        new RopResult<TCollection>(Result.Ok(incoming), token),
-                    (_, _, var result) => new RopResult<TCollection>(result, token),
-                };
-            }
-
-            return previous.Token.IsCancellationRequested
-                ? FailCancelled<TCollection>(token)
-                : previous.Result switch
-                {
-                    { IsSuccess: false, Errors: var errors } =>
-                        FailWithErrors<TCollection>(errors, token),
-                    { IsSuccess: true, Value: null } =>
-                        FailNoData<TCollection>(token),
-                    { IsSuccess: true, Value: var value } when !IsNullOrEmptyCollection(value) =>
-                        previous,
-                    { IsSuccess: true, Value: var value } =>
-                        await HandleEmptyCollectionAsync(value),
-                };
+                { IsSuccess: false, Errors: var errors } =>
+                    ValueTask.FromResult(FailWithErrors<TCollection>(errors, token)),
+                { IsSuccess: true, Value: null } =>
+                    ValueTask.FromResult(FailNoData<TCollection>(token)),
+                { IsSuccess: true, Value: var value } when !IsNullOrEmptyCollection(value) =>
+                    ValueTask.FromResult(previous),
+                { IsSuccess: true, Value: var value } =>
+                    HandleEmptyCollectionAsync(value, onNoData, token),
+            };
         });
+    }
+
+    private static async ValueTask<RopResult<TCollection>> HandleEmptyCollectionAsync<TCollection>(
+        TCollection incoming,
+        Func<NoDataContext, CancellationToken, ValueTask<Result<TCollection>>> onNoData,
+        CancellationToken token)
+        where TCollection : IEnumerable
+    {
+        NoDataContext context = new(token);
+        Result<TCollection> handlerResult = await onNoData(context, token);
+
+        return (token.IsCancellationRequested, context.IsTerminated, handlerResult) switch
+        {
+            (true, _, _) => FailCancelled<TCollection>(token),
+            (_, true, _) => FailPipelineTerminated<TCollection>(token),
+            (_, _, { IsSuccess: false, Errors: var errors }) =>
+                FailWithErrors<TCollection>(errors, token),
+            (_, _, { IsSuccess: true, Value: null }) =>
+                new RopResult<TCollection>(Result.Ok(incoming), token),
+            (_, _, var result) => new RopResult<TCollection>(result, token),
+        };
     }
 
     /// <summary>
@@ -505,56 +705,136 @@ public static partial class RailwayHelper
         where TCollection : IEnumerable
     {
         /// <summary>Преобразует синхронный делегат с <see cref="NoDataContext"/> в обработчик пустой коллекции.</summary>
-        public static Func<NoDataContext, CancellationToken, Task<Result<TCollection>>> From(Func<NoDataContext, TCollection> f) =>
-            (ctx, _) => Task.FromResult(Result.Ok(f(ctx)));
+        public static Func<NoDataContext, CancellationToken, ValueTask<Result<TCollection>>> From(Func<NoDataContext, TCollection> f)
+        {
+            var handler = EnsureHandler(f);
+            return (ctx, _) => ValueTask.FromResult(Result.Ok(handler(ctx)));
+        }
 
-        public static Func<NoDataContext, CancellationToken, Task<Result<TCollection>>> From(Func<NoDataContext, Result<TCollection>> f) =>
-            (ctx, _) => Task.FromResult(f(ctx));
+        public static Func<NoDataContext, CancellationToken, ValueTask<Result<TCollection>>> From(Func<NoDataContext, Result<TCollection>> f)
+        {
+            var handler = EnsureHandler(f);
+            return (ctx, _) => ValueTask.FromResult(handler(ctx));
+        }
 
-        public static Func<NoDataContext, CancellationToken, Task<Result<TCollection>>> From(Func<NoDataContext, Task<TCollection>> f) =>
-            async (ctx, _) => Result.Ok(await f(ctx));
+        public static Func<NoDataContext, CancellationToken, ValueTask<Result<TCollection>>> From(Func<NoDataContext, Task<TCollection>> f)
+        {
+            var handler = EnsureHandler(f);
+            return (ctx, _) => LiftOk(handler(ctx));
+        }
 
-        public static Func<NoDataContext, CancellationToken, Task<Result<TCollection>>> From(Func<NoDataContext, Task<Result<TCollection>>> f) =>
-            async (ctx, _) => await f(ctx);
+        public static Func<NoDataContext, CancellationToken, ValueTask<Result<TCollection>>> From(Func<NoDataContext, Task<Result<TCollection>>> f)
+        {
+            var handler = EnsureHandler(f);
+            return (ctx, _) => new ValueTask<Result<TCollection>>(handler(ctx));
+        }
 
-        public static Func<NoDataContext, CancellationToken, Task<Result<TCollection>>> From(Func<NoDataContext, CancellationToken, TCollection> f) =>
-            (ctx, token) => Task.FromResult(Result.Ok(f(ctx, token)));
+        public static Func<NoDataContext, CancellationToken, ValueTask<Result<TCollection>>> From(Func<NoDataContext, CancellationToken, TCollection> f)
+        {
+            var handler = EnsureHandler(f);
+            return (ctx, token) => ValueTask.FromResult(Result.Ok(handler(ctx, token)));
+        }
 
-        public static Func<NoDataContext, CancellationToken, Task<Result<TCollection>>> From(Func<NoDataContext, CancellationToken, Result<TCollection>> f) =>
-            (ctx, token) => Task.FromResult(f(ctx, token));
+        public static Func<NoDataContext, CancellationToken, ValueTask<Result<TCollection>>> From(Func<NoDataContext, CancellationToken, Result<TCollection>> f)
+        {
+            var handler = EnsureHandler(f);
+            return (ctx, token) => ValueTask.FromResult(handler(ctx, token));
+        }
 
-        public static Func<NoDataContext, CancellationToken, Task<Result<TCollection>>> From(Func<NoDataContext, CancellationToken, Task<TCollection>> f) =>
-            async (ctx, token) => Result.Ok(await f(ctx, token));
+        public static Func<NoDataContext, CancellationToken, ValueTask<Result<TCollection>>> From(Func<NoDataContext, CancellationToken, Task<TCollection>> f)
+        {
+            var handler = EnsureHandler(f);
+            return (ctx, token) => LiftOk(handler(ctx, token));
+        }
 
         /// <summary>Преобразует void-делегат с <see cref="NoDataContext"/> в обработчик пустой коллекции.</summary>
-        public static Func<NoDataContext, CancellationToken, Task<Result<TCollection>>> FromVoid(Action<NoDataContext> f) =>
-            async (ctx, _) => { f(ctx); return Result.Ok<TCollection>(default!); };
+        public static Func<NoDataContext, CancellationToken, ValueTask<Result<TCollection>>> FromVoid(Action<NoDataContext> f)
+        {
+            var handler = EnsureHandler(f);
+            return (ctx, _) =>
+            {
+                handler(ctx);
+                return ValueTask.FromResult(Result.Ok<TCollection>(default!));
+            };
+        }
 
-        public static Func<NoDataContext, CancellationToken, Task<Result<TCollection>>> FromVoid(Func<NoDataContext, Task> f) =>
-            async (ctx, _) => { await f(ctx); return Result.Ok<TCollection>(default!); };
+        public static Func<NoDataContext, CancellationToken, ValueTask<Result<TCollection>>> FromVoid(Func<NoDataContext, Task> f)
+        {
+            var handler = EnsureHandler(f);
+            return (ctx, _) => LiftVoidCollection(handler(ctx));
+        }
 
-        public static Func<NoDataContext, CancellationToken, Task<Result<TCollection>>> FromVoid(Func<NoDataContext, Result> f) =>
-            async (ctx, _) => ToCollectionResult(f(ctx));
+        public static Func<NoDataContext, CancellationToken, ValueTask<Result<TCollection>>> FromVoid(Func<NoDataContext, Result> f)
+        {
+            var handler = EnsureHandler(f);
+            return (ctx, _) => ValueTask.FromResult(ToCollectionResult(handler(ctx)));
+        }
 
-        public static Func<NoDataContext, CancellationToken, Task<Result<TCollection>>> FromVoid(Func<NoDataContext, Task<Result>> f) =>
-            async (ctx, _) => ToCollectionResult(await f(ctx));
+        public static Func<NoDataContext, CancellationToken, ValueTask<Result<TCollection>>> FromVoid(Func<NoDataContext, Task<Result>> f)
+        {
+            var handler = EnsureHandler(f);
+            return (ctx, _) => LiftCollectionResult(handler(ctx));
+        }
 
-        public static Func<NoDataContext, CancellationToken, Task<Result<TCollection>>> FromVoid(Action<NoDataContext, CancellationToken> f) =>
-            async (ctx, token) => { f(ctx, token); return Result.Ok<TCollection>(default!); };
+        public static Func<NoDataContext, CancellationToken, ValueTask<Result<TCollection>>> FromVoid(Action<NoDataContext, CancellationToken> f)
+        {
+            var handler = EnsureHandler(f);
+            return (ctx, token) =>
+            {
+                handler(ctx, token);
+                return ValueTask.FromResult(Result.Ok<TCollection>(default!));
+            };
+        }
 
-        public static Func<NoDataContext, CancellationToken, Task<Result<TCollection>>> FromVoid(Func<NoDataContext, CancellationToken, Task> f) =>
-            async (ctx, token) => { await f(ctx, token); return Result.Ok<TCollection>(default!); };
+        public static Func<NoDataContext, CancellationToken, ValueTask<Result<TCollection>>> FromVoid(Func<NoDataContext, CancellationToken, Task> f)
+        {
+            var handler = EnsureHandler(f);
+            return (ctx, token) => LiftVoidCollection(handler(ctx, token));
+        }
 
-        public static Func<NoDataContext, CancellationToken, Task<Result<TCollection>>> FromVoid(Func<NoDataContext, CancellationToken, Result> f) =>
-            async (ctx, token) => ToCollectionResult(f(ctx, token));
+        public static Func<NoDataContext, CancellationToken, ValueTask<Result<TCollection>>> FromVoid(Func<NoDataContext, CancellationToken, Result> f)
+        {
+            var handler = EnsureHandler(f);
+            return (ctx, token) => ValueTask.FromResult(ToCollectionResult(handler(ctx, token)));
+        }
 
-        public static Func<NoDataContext, CancellationToken, Task<Result<TCollection>>> FromVoid(Func<NoDataContext, CancellationToken, Task<Result>> f) =>
-            async (ctx, token) => ToCollectionResult(await f(ctx, token));
+        public static Func<NoDataContext, CancellationToken, ValueTask<Result<TCollection>>> FromVoid(Func<NoDataContext, CancellationToken, Task<Result>> f)
+        {
+            var handler = EnsureHandler(f);
+            return (ctx, token) => LiftCollectionResult(handler(ctx, token));
+        }
+
+        private static ValueTask<Result<TCollection>> LiftVoidCollection(Task task)
+        {
+            if (task.IsCompletedSuccessfully)
+                return ValueTask.FromResult(Result.Ok<TCollection>(default!));
+            return LiftVoidCollectionCore(task);
+        }
+
+        private static async ValueTask<Result<TCollection>> LiftVoidCollectionCore(Task task)
+        {
+            await task;
+            return Result.Ok<TCollection>(default!);
+        }
+
+        private static ValueTask<Result<TCollection>> LiftCollectionResult(Task<Result> task)
+        {
+            if (task.IsCompletedSuccessfully)
+                return ValueTask.FromResult(ToCollectionResult(task.Result));
+            return LiftCollectionResultCore(task);
+        }
+
+        private static async ValueTask<Result<TCollection>> LiftCollectionResultCore(Task<Result> task) =>
+            ToCollectionResult(await task);
 
         /// <summary>Преобразует <see cref="Result"/> void-обработчика в <see cref="Result{TCollection}"/>.</summary>
         /// <param name="result">Результат void-обработчика.</param>
         private static Result<TCollection> ToCollectionResult(Result result) =>
             result.IsSuccess ? Result.Ok<TCollection>(default!) : Result.Fail<TCollection>(result.Errors);
+
+        private static TDelegate EnsureHandler<TDelegate>(TDelegate handler)
+            where TDelegate : class =>
+            handler ?? throw new ArgumentNullException(nameof(handler));
     }
 
     /// <summary>
@@ -567,7 +847,7 @@ public static partial class RailwayHelper
     /// <param name="context">Контекст входных данных шага.</param>
     private static Result<TInput> AttachContext<TInput>(Result<TInput> result, string label, object context) =>
         result.IsFailed && HasCallData(label, context)
-            ? Result.Fail<TInput>(result.Errors.Union([new ParametrizedError(label, context)]))
+            ? Result.Fail<TInput>(AppendCallData(result.Errors, label, context))
             : result;
 
     /// <summary>
@@ -579,8 +859,30 @@ public static partial class RailwayHelper
     /// <param name="context">Контекст входных данных шага.</param>
     private static Result AttachContext(Result result, string label, object context) =>
         result.IsFailed && HasCallData(label, context)
-            ? Result.Fail(result.Errors.Union([new ParametrizedError(label, context)]))
+            ? Result.Fail(AppendCallData(result.Errors, label, context))
             : result;
+
+    /// <summary>
+    /// Добавляет <see cref="ParametrizedError"/> к существующим ошибкам без <see cref="Enumerable.Union{TSource}"/>.
+    /// </summary>
+    /// <param name="errors">Ошибки исходного результата.</param>
+    /// <param name="label">Метка шага.</param>
+    /// <param name="context">Контекст входных данных шага.</param>
+    private static IEnumerable<IError> AppendCallData(IReadOnlyList<IError> errors, string label, object context)
+    {
+        var callData = new ParametrizedError(label, context);
+        int count = errors.Count;
+        if (count == 0)
+            return [callData];
+
+        if (count == 1)
+            return new IError[] { errors[0], callData };
+
+        var merged = new List<IError>(count + 1);
+        merged.AddRange(errors);
+        merged.Add(callData);
+        return merged;
+    }
 
     /// <summary><c>true</c>, если к ошибке шага есть контекст входа или метка для маршрутизации.</summary>
     private static bool HasCallData(string label, object context) =>
@@ -594,9 +896,9 @@ public static partial class RailwayHelper
     /// <param name="source">Входная коллекция.</param>
     /// <param name="step">Асинхронная функция для элемента.</param>
     /// <param name="token">Токен отмены.</param>
-    private static async Task<Result<IEnumerable<TOutput>>> EachCore<TInput, TOutput>(
+    private static async ValueTask<Result<IEnumerable<TOutput>>> EachCore<TInput, TOutput>(
     IEnumerable<TInput> source,
-    Func<TInput, CancellationToken, Task<Result<TOutput>>> step,
+    Func<TInput, CancellationToken, ValueTask<Result<TOutput>>> step,
     CancellationToken token)
     {
         (IEnumerable<TOutput> items, TInput abortedOn, Result iterationFailure) = await SelectEachAsync<TInput, TOutput>(source, step, token);
@@ -615,15 +917,27 @@ public static partial class RailwayHelper
     /// <param name="source">Входная коллекция.</param>
     /// <param name="step">Асинхронная функция для элемента.</param>
     /// <param name="token">Токен отмены.</param>
-    private static async Task<Result> EachCoreVoid<TInput>(
+    private static async ValueTask<Result> EachCoreVoid<TInput>(
         IEnumerable<TInput> source,
-        Func<TInput, CancellationToken, Task<Result>> step,
+        Func<TInput, CancellationToken, ValueTask<Result>> step,
         CancellationToken token)
     {
-        (_, TInput abortedOn, Result iterationFailure) = await SelectEachAsync<TInput, object>(
-            source,
-            async (item, t) => (await step(item, t)).ToResult<object>(),
-            token);
+        TInput abortedOn = default;
+        Result iterationFailure = Result.Ok();
+        foreach (TInput item in source)
+        {
+            if (token.IsCancellationRequested)
+                break;
+
+            Result stepResult = await step(item, token);
+            if (stepResult.IsSuccess)
+                continue;
+
+            abortedOn = item;
+            iterationFailure = stepResult;
+            break;
+        }
+
         return (token.IsCancellationRequested, iterationFailure.IsFailed) switch
         {
             (true, _) => FailCancelled(token),
@@ -716,9 +1030,9 @@ public static partial class RailwayHelper
     /// <typeparam name="TOut">Тип результата текущего шага.</typeparam>
     /// <param name="inputTask">Задача с результатом предыдущего шага.</param>
     /// <param name="step">Функция текущего шага.</param>
-    private static Task<RopResult<TOut>> ExecutePipelineStep<TIn, TOut>(
-        Task<RopResult<TIn>> inputTask,
-        Func<RopResult<TIn>, CancellationToken, Task<RopResult<TOut>>> step) =>
+    private static ValueTask<RopResult<TOut>> ExecutePipelineStep<TIn, TOut>(
+        ValueTask<RopResult<TIn>> inputTask,
+        Func<RopResult<TIn>, CancellationToken, ValueTask<RopResult<TOut>>> step) =>
         ExecutePipelineStepCore(inputTask, static previous => previous.Token, step, FailCancelled<TOut>, FailExceptional<TOut>);
 
     /// <summary>
@@ -727,9 +1041,9 @@ public static partial class RailwayHelper
     /// <typeparam name="TIn">Тип значения предыдущего шага.</typeparam>
     /// <param name="inputTask">Задача с результатом предыдущего шага.</param>
     /// <param name="step">Функция текущего шага.</param>
-    private static Task<RopResult> ExecutePipelineStep<TIn>(
-        Task<RopResult<TIn>> inputTask,
-        Func<RopResult<TIn>, CancellationToken, Task<RopResult>> step) =>
+    private static ValueTask<RopResult> ExecutePipelineStep<TIn>(
+        ValueTask<RopResult<TIn>> inputTask,
+        Func<RopResult<TIn>, CancellationToken, ValueTask<RopResult>> step) =>
         ExecutePipelineStepCore(inputTask, static previous => previous.Token, step, FailCancelled, FailExceptional);
 
     /// <summary>
@@ -737,9 +1051,9 @@ public static partial class RailwayHelper
     /// </summary>
     /// <param name="inputTask">Задача с результатом предыдущего шага.</param>
     /// <param name="step">Функция текущего шага.</param>
-    private static Task<RopResult> ExecutePipelineStep(
-        Task<RopResult> inputTask,
-        Func<RopResult, CancellationToken, Task<RopResult>> step) =>
+    private static ValueTask<RopResult> ExecutePipelineStep(
+        ValueTask<RopResult> inputTask,
+        Func<RopResult, CancellationToken, ValueTask<RopResult>> step) =>
         ExecutePipelineStepCore(inputTask, static previous => previous.Token, step, FailCancelled, FailExceptional);
 
     /// <summary>
@@ -748,9 +1062,9 @@ public static partial class RailwayHelper
     /// <typeparam name="TOut">Тип результата текущего шага.</typeparam>
     /// <param name="inputTask">Задача с результатом предыдущего шага.</param>
     /// <param name="step">Функция текущего шага.</param>
-    private static Task<RopResult<TOut>> ExecutePipelineStep<TOut>(
-        Task<RopResult> inputTask,
-        Func<RopResult, CancellationToken, Task<RopResult<TOut>>> step) =>
+    private static ValueTask<RopResult<TOut>> ExecutePipelineStep<TOut>(
+        ValueTask<RopResult> inputTask,
+        Func<RopResult, CancellationToken, ValueTask<RopResult<TOut>>> step) =>
         ExecutePipelineStepCore(inputTask, static previous => previous.Token, step, FailCancelled<TOut>, FailExceptional<TOut>);
 
     /// <summary>
@@ -763,10 +1077,10 @@ public static partial class RailwayHelper
     /// <param name="step">Функция текущего шага.</param>
     /// <param name="failCancelled">Фабрика результата при отмене.</param>
     /// <param name="failExceptional">Фабрика результата при необработанном исключении.</param>
-    private static async Task<TResult> ExecutePipelineStepCore<TResult, TPrevious>(
-        Task<TPrevious> inputTask,
+    private static async ValueTask<TResult> ExecutePipelineStepCore<TResult, TPrevious>(
+        ValueTask<TPrevious> inputTask,
         Func<TPrevious, CancellationToken> getToken,
-        Func<TPrevious, CancellationToken, Task<TResult>> step,
+        Func<TPrevious, CancellationToken, ValueTask<TResult>> step,
         Func<CancellationToken, TResult> failCancelled,
         Func<Exception, CancellationToken, TResult> failExceptional)
     {
@@ -792,8 +1106,8 @@ public static partial class RailwayHelper
     /// </summary>
     /// <param name="action">Функция шага.</param>
     /// <param name="token">Токен отмены.</param>
-    private static async Task<RopResult> Guard(
-        Func<CancellationToken, Task<RopResult>> action,
+    private static async ValueTask<RopResult> Guard(
+        Func<CancellationToken, ValueTask<RopResult>> action,
         CancellationToken token)
     {
         try
@@ -816,8 +1130,8 @@ public static partial class RailwayHelper
     /// <typeparam name="TInput">Тип значения результата шага.</typeparam>
     /// <param name="action">Функция шага.</param>
     /// <param name="token">Токен отмены.</param>
-    private static async Task<RopResult<TInput>> Guard<TInput>(
-    Func<CancellationToken, Task<RopResult<TInput>>> action,
+    private static async ValueTask<RopResult<TInput>> Guard<TInput>(
+    Func<CancellationToken, ValueTask<RopResult<TInput>>> action,
     CancellationToken token)
     {
         try
@@ -832,6 +1146,30 @@ public static partial class RailwayHelper
         {
             return FailExceptional<TInput>(ex, token);
         }
+    }
+
+    /// <summary>Оборачивает <see cref="Task{T}"/> в <see cref="Result.Ok{T}(T)"/> без async-лямбды в адаптерах.</summary>
+    private static ValueTask<Result<T>> LiftOk<T>(Task<T> task)
+    {
+        if (task.IsCompletedSuccessfully)
+            return ValueTask.FromResult(Result.Ok(task.Result));
+        return LiftOkCore(task);
+    }
+
+    private static async ValueTask<Result<T>> LiftOkCore<T>(Task<T> task) => Result.Ok(await task);
+
+    /// <summary>Ожидает void-<see cref="Task"/> и возвращает успешный <see cref="Result"/>.</summary>
+    private static ValueTask<Result> LiftVoid(Task task)
+    {
+        if (task.IsCompletedSuccessfully)
+            return ValueTask.FromResult(Result.Ok());
+        return LiftVoidCore(task);
+    }
+
+    private static async ValueTask<Result> LiftVoidCore(Task task)
+    {
+        await task;
+        return Result.Ok();
     }
 
     #endregion
